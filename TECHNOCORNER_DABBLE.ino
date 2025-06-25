@@ -1,0 +1,120 @@
+#define CUSTOM_SETTINGS
+#define INCLUDE_GAMEPAD_MODULE
+#include <DabbleESP32.h>
+
+// Motor pins
+const int enableRightMotor = 22; 
+const int rightMotorPin1 = 16;
+const int rightMotorPin2 = 17;
+const int enableLeftMotor = 23;
+const int leftMotorPin1 = 18;
+const int leftMotorPin2 = 19;
+
+#define MAX_MOTOR_SPEED 255
+
+// PWM settings
+const int PWMFreq = 1000;
+const int PWMResolution = 8;
+const int rightMotorPWMSpeedChannel = 4;
+const int leftMotorPWMSpeedChannel = 5;
+
+void rotateMotor(int rightMotorSpeed, int leftMotorSpeed) {
+  // Right motor control
+  digitalWrite(rightMotorPin1, rightMotorSpeed > 0 ? HIGH : LOW);
+  digitalWrite(rightMotorPin2, rightMotorSpeed < 0 ? HIGH : LOW);
+  
+  // Left motor control
+  digitalWrite(leftMotorPin1, leftMotorSpeed > 0 ? HIGH : LOW);
+  digitalWrite(leftMotorPin2, leftMotorSpeed < 0 ? HIGH : LOW);
+  
+  // Apply PWM speed
+  ledcWrite(rightMotorPWMSpeedChannel, abs(rightMotorSpeed));
+  ledcWrite(leftMotorPWMSpeedChannel, abs(leftMotorSpeed));  
+}
+
+void setup() {
+  Serial.begin(115200);
+  
+  // Initialize motor pins
+  pinMode(enableRightMotor, OUTPUT);
+  pinMode(rightMotorPin1, OUTPUT);
+  pinMode(rightMotorPin2, OUTPUT);
+  pinMode(enableLeftMotor, OUTPUT);
+  pinMode(leftMotorPin1, OUTPUT);
+  pinMode(leftMotorPin2, OUTPUT);
+
+  // PWM setup
+  ledcSetup(rightMotorPWMSpeedChannel, PWMFreq, PWMResolution);
+  ledcSetup(leftMotorPWMSpeedChannel, PWMFreq, PWMResolution);  
+  ledcAttachPin(enableRightMotor, rightMotorPWMSpeedChannel);
+  ledcAttachPin(enableLeftMotor, leftMotorPWMSpeedChannel);
+
+  // Start Dabble in Joystick Mode
+  Dabble.begin("MyJoystickCar");
+  Serial.println("Waiting for Bluetooth connection...");
+}
+
+void loop() {
+  Dabble.processInput();
+  
+  // Connection status
+  static bool lastConnectionState = false;
+  bool currentConnectionState = Dabble.isAppConnected();
+  if (currentConnectionState != lastConnectionState) {
+    Serial.println(currentConnectionState ? "Bluetooth Connected!" : "Bluetooth Disconnected");
+    lastConnectionState = currentConnectionState;
+  }
+
+  if (currentConnectionState) {
+    // Get joystick values (range: -7 to 7)
+    int xAxis = GamePad.getXaxisData();
+    int yAxis = GamePad.getYaxisData();
+    
+    // Display joystick values
+    Serial.print("Joystick X: ");
+    Serial.print(xAxis);
+    Serial.print("\tY: ");
+    Serial.println(yAxis);
+
+    // Convert joystick to motor speeds (differential drive)
+    int baseSpeed = map(abs(yAxis), 0, 7, 0, MAX_MOTOR_SPEED);
+    int turnOffset = map(abs(xAxis), 0, 7, 0, MAX_MOTOR_SPEED);
+    
+    int leftSpeed = 0;
+    int rightSpeed = 0;
+    
+    if (yAxis > 0) { // Forward
+      leftSpeed = baseSpeed;
+      rightSpeed = baseSpeed;
+      if (xAxis > 0) { // Right turn
+        rightSpeed -= turnOffset;
+      } else if (xAxis < 0) { // Left turn
+        leftSpeed -= turnOffset;
+      }
+    } else if (yAxis < 0) { // Backward
+      leftSpeed = -baseSpeed;
+      rightSpeed = -baseSpeed;
+      if (xAxis > 0) { // Right turn
+        rightSpeed += turnOffset;
+      } else if (xAxis < 0) { // Left turn
+        leftSpeed += turnOffset;
+      }
+    } else { // Only turning in place
+      if (xAxis > 0) {
+        rightSpeed = -turnOffset;
+        leftSpeed = turnOffset;
+      } else if (xAxis < 0) {
+        rightSpeed = turnOffset;
+        leftSpeed = -turnOffset;
+      }
+    }
+    
+    // Apply motor speeds
+    rotateMotor(rightSpeed, leftSpeed);
+  } else {
+    // Stop motors if disconnected
+    rotateMotor(0, 0);
+  }
+  
+  delay(50);
+}
